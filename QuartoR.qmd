@@ -1,0 +1,650 @@
+---
+title: "QuartoR"
+format: pdf
+editor: visual
+---
+
+# 
+
+**Realized by : siwar najjar , Karim Dammak, Mahmoud Aziz Ammar**
+
+```{r}
+library(data.table)
+library(dplyr)
+library(stringr)
+library(readxl)
+library(shiny)
+library(sf)
+library(rsconnect)
+library(leaflet)
+library(ggplot2)
+library(lubridate)
+library(leaflet)
+library(leaflet.extras)
+
+```
+
+### 1 Data cleaning and Data visualization
+
+Reading the data from 2018 to 2022
+
+```{r}
+data1 <- fread("data/2018_S1_NB_FER.txt", header = TRUE, sep = "\t")  
+data2 <- fread("data/2018_S2_NB_FER.txt", header = TRUE, sep = "\t")  
+data3 <- fread("data/2019_S1_NB_FER.txt", header = TRUE, sep = "\t")
+data4 <- fread("data/2019_S2_NB_FER.txt", header = TRUE, sep = "\t")
+data5 <- fread("data/2020_S1_NB_FER.txt", header = TRUE, sep = "\t")
+data6 <- fread("data/2020_S2_NB_FER.txt", header = TRUE, sep = "\t")
+data7 <- fread("data/2021_S1_NB_FER.txt", header = TRUE, sep = "\t")
+data8 <- fread("data/2021_S2_NB_FER.txt", header = TRUE, sep = "\t")
+data9 <- fread("data/2022_S1_NB_FER.txt", header = TRUE, sep = "\t")
+data10 <- fread("data/2022_S2_NB_FER.txt", header = TRUE, sep = ";")
+
+```
+
+```{r}
+# rm(list = ls())
+
+```
+
+Reading the data from the first semester of 2023
+
+```{r}
+data11<- fread("data/data-rf-2023-s1.csv", header = TRUE, sep = ";")
+
+
+```
+
+-   **Raw Data Visualization**
+
+```{r}
+
+#combine the whole data
+data_list <- list(data1, data2, data3, data4, data5, data6, data7, data8, data9, data10)
+
+#print the column names and types
+invisible(lapply(seq_along(data_list), function(i) {
+  cat("\n--- Structure of dataset", i, "---\n")
+  str(data_list[[i]])
+}))
+combined_dataI <- rbindlist(data_list)
+```
+
+2023 Visualization
+
+```{r}
+
+# first few rows 
+head(data11)
+# Get the column names
+column_names <- names(data11)
+print(column_names)
+
+```
+
+The Column Date seems to have different types in my data, It should be converted to a date format for both
+
+```{r}
+
+data11[[1]] <- as.Date(data11[[1]])  # Convert IDate to Date
+
+
+# Verify the result
+head(data11)
+str(data11)
+
+```
+
+```{r}
+
+# Convert 'JOUR' column to Date format
+combined_dataI$JOUR <- as.Date(combined_dataI$JOUR, format = "%d/%m/%Y")
+
+# Verify the result
+head(combined_dataI)
+str(combined_dataI)
+
+
+```
+
+```{r}
+
+class(combined_dataI[[1]])
+class(data11[[1]])
+
+```
+
+```{r}
+# Append data11 to the combined dataset
+
+combined_data <- rbindlist(list(combined_dataI, data11))
+
+# Verify the result
+head(combined_data)
+str(combined_data)
+
+```
+
+-   It seems that CODE_STIF_RES and CODE_STIF_ARRET have chr type even thought they are numeric
+
+```{r}
+
+# Convert CODE_STIF_RES and CODE_STIF_ARRET to integer in place
+combined_data[, CODE_STIF_RES := as.integer(CODE_STIF_RES)]
+combined_data[, CODE_STIF_ARRET := as.integer(CODE_STIF_ARRET)]
+
+```
+
+```{r}
+#check for the converted datatypes
+# Display structure in the console
+str(combined_data)
+
+```
+
+-   **Treating Missing Values**
+
+```{r}
+
+# Identify numeric columns
+numeric_cols <- names(combined_data)[sapply(combined_data, is.numeric)]
+
+# Check for missing values in numeric columns
+missing_summary <- sapply(numeric_cols, function(col) sum(is.na(combined_data[[col]])))
+
+# Print the summary
+print("Missing values in numeric columns:")
+print(missing_summary)
+
+#missing values percentage 
+missing_rate_res <- sum(is.na(combined_data$CODE_STIF_RES)) / nrow(combined_data)
+missing_rate_arret <- sum(is.na(combined_data$CODE_STIF_ARRET)) / nrow(combined_data)
+
+print(paste("Missing rate for CODE_STIF_RES:", missing_rate_res))
+print(paste("Missing rate for CODE_STIF_ARRET:", missing_rate_arret))
+
+
+# Remove rows with any NA values
+dt<- na.omit(combined_data)
+
+# Verify the number of rows before and after removal
+nrow(combined_data)  # Original number of rows
+nrow(dt)  # Number of rows after removal
+```
+
+-   the missing information is small that we can delete it
+
+```{r}
+
+# Convert the empty values to NA
+dt[dt == ""] <- NA
+
+# Replace "?" with NA in the column ID_REFA_LDA
+dt<- dt %>%
+  mutate(ID_REFA_LDA = ifelse(ID_REFA_LDA == "?", NA, ID_REFA_LDA))
+# Replace "?" with NA in the column CATEGORIE_TITRE
+dt <- dt %>%
+  mutate(CATEGORIE_TITRE = ifelse(CATEGORIE_TITRE == "?", NA, CATEGORIE_TITRE))
+
+# Count the number of missing values for each column
+missing_values <- colSums(is.na(dt))
+
+# Display results
+print(missing_values)
+```
+
+-   deleting NA values
+
+```{r}
+# Delete missing values
+dt <- na.omit(dt)
+
+# Count the number of missing values in every column
+missing_values <- colSums(is.na(dt))
+
+# Display the result
+print(missing_values)
+```
+
+-   deleting any redundancy
+
+```{r}
+dt <-dt[!duplicated(dt), ]
+nrow(dt)
+
+```
+
+-   **Checking outliers**
+
+```{r}
+boxplot(dt$NB_VALD)
+```
+
+-   The boxplot shows a highly skewed distribution with significant outliers, indicating that most values are clustered near the lower end, while a few exceptionally large values greatly deviate from the majority of the data.
+
+```{r}
+# Extract the NB_VALD column
+nb <- dt$NB_VALD
+
+# Calculate Q1 (25th percentile) and Q3 (75th percentile)
+Q1 <- quantile(nb, 0.25, na.rm = TRUE)
+Q3 <- quantile(nb, 0.75, na.rm = TRUE)
+
+# Calculate IQR
+IQR <- Q3 - Q1
+
+# Define lower and upper bounds for outliers
+lower_bound <- Q1 - 1.5 * IQR
+upper_bound <- Q3 + 1.5 * IQR
+
+# Identify and print outliers
+outliers <- nb[nb < lower_bound | nb > upper_bound]
+cat("Outliers:\n")
+print(outliers)
+```
+
+```{r}
+nrow(dt)
+head(dt)
+```
+
+-   After analyzing the boxplot of `NB_VALD` (number of validations) and applying the Interquartile Range (IQR) method, we observe that the majority of the values are relatively low. Using this method, outliers were identified as values significantly below the lower boundary (calculated based on the first quartile and IQR) or significantly above the upper boundary (calculated based on the third quartile and IQR). These thresholds help flag unusually low or high values as potential outliers.
+
+-   While some values are significantly higher, they are not classified as outliers since they correspond to highly populated zones . These zones naturally experience a much higher number of validations due to their importance as major transit hubs. The maximum observed value of around 120,000, though high, is plausible and reflects real-world data for these zones.
+
+-   **Geographical data**
+
+```{r}
+# Load the new dataset
+# Read the CSV file with a header
+GeoData <- read.csv("data/zones-d-arrets.csv", header = TRUE, sep = ";")
+
+# Display the first few rows
+str(GeoData)
+
+```
+
+-   Geographical data cleaning: checking for duplicates and null values
+
+```{r}
+str(GeoData)
+
+```
+
+-   In our case we are only interested on the geographical columns that are `dAXEpsg2154` (longitude) and `ZdAYEpsg2154` (latitude) coordinates.
+
+```{r}
+# Columns to check
+columns_to_check <- c("ZdAYEpsg2154", "ZdAXEpsg2154", "ZdCId")
+
+# Check for NA values in these columns
+na_counts <- sapply(GeoData[columns_to_check], function(col) sum(is.na(col)))
+
+# Print the count of NA values for each column
+print(na_counts)
+
+
+
+
+```
+
+```{r}
+
+GeoData <-GeoData[!duplicated(GeoData), ]
+
+
+```
+
+```{r}
+head(GeoData)
+```
+
+```{r}
+# Check if any column in GeoData matches ID_REFA_LDA
+table(GeoData$ZdCId %in% unique(dt$ID_REFA_LDA))
+```
+
+```{r}
+# Check duplicates in GeoData
+GeoData_duplicates <- GeoData[duplicated(GeoData$ZdCId), ]
+
+# Check duplicates in merged_data
+merged_data_duplicates <- dt[duplicated(dt$ID_REFA_LDA), ]
+
+```
+
+```{r}
+# Select only the required columns
+cols <- c("ZdAYEpsg2154", "ZdAXEpsg2154", "ZdCId")
+
+GeoData <- GeoData[, cols, drop = FALSE]
+head(GeoData)
+# Select only duplicates in GeoData
+GeoData_duplicates <- GeoData[duplicated(GeoData$ZdCId) | duplicated(GeoData$ZdCId, fromLast = TRUE), ]
+
+# Display duplicates
+head(GeoData_duplicates)
+
+```
+
+-   Merging the data after grouping by 'ID_REFA_LDA', 'JOUR' and 'LIBELLE_ARRET'
+
+```{r}
+# Ensure ZdCId is unique in GeoData
+GeoData_unique <- GeoData %>%
+  distinct(ZdCId, .keep_all = TRUE) # Keep only the first occurrence of each ZdCId
+
+# Perform the join with dt, keeping only matching rows
+final_data <- dt %>%
+  group_by(ID_REFA_LDA, JOUR, LIBELLE_ARRET) %>%
+  summarize(Sum_NB_VALD = sum(as.numeric(NB_VALD), na.rm = TRUE), .groups = 'drop') %>%
+  inner_join(GeoData_unique, by = c("ID_REFA_LDA" = "ZdCId")) # Use inner join to keep only common values
+
+# View the resulting dataset
+head(final_data)
+
+```
+
+```{r}
+nrow(final_data)
+```
+
+```{r}
+str(final_data)
+```
+
+```{r}
+# Count NA values for each column using apply
+na_counts <- apply(final_data, 2, function(x) sum(is.na(x)))
+print(na_counts)
+
+```
+
+```{r}
+fwrite(final_data, "final_data_cleaned.csv")
+```
+
+### **2. Exploratory Data Analysis (EDA)**
+
+-   **Data Summary**
+
+```{r}
+# Summary statistics for each column
+summary(final_data)
+
+# Check the structure of the dataset
+str(final_data)
+
+```
+
+```{r}
+filtered_data <- final_data %>%
+  filter(!is.na(ZdAXEpsg2154) & !is.na(ZdAYEpsg2154) & !is.na(Sum_NB_VALD)) # Remove rows with missing values
+
+#Convert to spatial object 
+filtered_data_sf <- st_as_sf(
+  filtered_data,
+  coords = c("ZdAXEpsg2154", "ZdAYEpsg2154"), # Longitude and Latitude columns
+  crs = 2154 # Coordinate Reference System: Lambert-93
+)
+
+filtered_data_sf <- st_transform(filtered_data_sf, crs = 4326)
+
+#longitude and latitude for plotting
+filtered_data <- filtered_data %>%
+  mutate(
+    X = st_coordinates(filtered_data_sf)[, "X"], # Longitude
+    Y = st_coordinates(filtered_data_sf)[, "Y"]  # Latitude
+  )
+
+# a heatmap to visualize Sum_NB_VALD
+my_heatmap <- leaflet(filtered_data) %>%
+  addTiles() %>% # Add OpenStreetMap tiles
+  setView(
+    lng = mean(filtered_data$X, na.rm = TRUE), # Center the map based on the average longitude
+    lat = mean(filtered_data$Y, na.rm = TRUE), # Center the map based on the average latitude
+    zoom = 11 # Set initial zoom level
+  ) %>%
+  addHeatmap(
+    lng = ~X, # Use longitude for the heatmap
+    lat = ~Y, # Use latitude for the heatmap
+    intensity = ~Sum_NB_VALD, # Intensity based on Sum_NB_VALD
+    blur = 20, # Smoothness of heatmap points
+    max = max(filtered_data$Sum_NB_VALD, na.rm = TRUE), # Normalize intensity
+    radius = 15 # Size of heatmap points
+  )
+
+#Display the heatmap
+my_heatmap
+```
+
+-   This map visualizes the geographical distribution of public transport-related locations across the Île-de-France region, which encompasses Paris and its surrounding areas. The dense clustering of markers around central Paris highlights the high concentration of transport activity, likely corresponding to major hubs like train stations, metro stops, and bus terminals. As you move outward from the city center, the markers become more dispersed, reflecting the suburban and rural nature of the outer Île-de-France areas with lower transport density. This visualization provides a clear overview of the transport network's spatial layout, emphasizing the urban-rural divide and potential areas for infrastructure development or optimization in less connected regions.
+
+### **Overall Ridershp Trends**
+
+```{r}
+
+# Aggregate total validations per day
+daily_ridership <- final_data %>%
+  group_by(JOUR) %>%
+  summarize(Total_Validations = sum(Sum_NB_VALD, na.rm = TRUE), .groups = "drop")
+
+# Plot daily ridership with yearly facets
+ggplot(daily_ridership, aes(x = JOUR, y = Total_Validations)) +
+  geom_line(color = "blue") +
+  facet_wrap(~year(JOUR), scales = "free_x") +
+  labs(title = "Daily Ridership Trends by Year", x = "Date", y = "Total Validations") +
+  theme_minimal()
+```
+
+### Observations:
+
+1.  **2018 and 2019 (Pre-COVID-19 Period)**:
+
+    -   Ridership shows a regular pattern with consistent peaks and troughs.
+
+    <!-- -->
+
+    -   The data likely reflects typical daily and weekly travel trends, with weekdays having higher ridership than weekends.
+
+2.  **2020 (COVID-19 Outbreak)**:
+
+    -   A **sharp drop in ridership** is noticeable starting in March 2020.
+
+    -   This aligns with the onset of the COVID-19 pandemic, when lockdowns, work-from-home policies, and travel restrictions were introduced globally, including in France.
+
+    -   Ridership remains low for several months, reflecting reduced public transport usage due to restrictions and fear of virus transmission.
+
+3.  **2021 (Post-First Wave Recovery)**:
+
+    -   Ridership begins to recover gradually, but patterns remain irregular.
+
+    -   Likely due to varying levels of restrictions, hybrid work models, and reduced travel demand during subsequent COVID-19 waves.
+
+4.  **2022 and 2023 (Recovery Period)**:
+
+    -   A steady increase in ridership is observed, suggesting that public transport usage is normalizing.
+
+    -   By late 2022 and into 2023, patterns appear more consistent, resembling pre-pandemic trends.
+
+### **Explore Monthly Trends**
+
+```{r}
+final_data <- final_data %>%
+  mutate(
+    Month = month(JOUR), # Extract numeric month
+    Month_Name = factor(month.name[Month], levels = month.name) # Convert to full month name
+  )
+
+# Group by Month_Name for all months and calculate total ridership
+monthly_trends <- final_data %>%
+  group_by(Month_Name) %>%
+  summarize(Total_Validations = sum(Sum_NB_VALD, na.rm = TRUE)) %>%
+  mutate(Month_Name = factor(Month_Name, levels = month.name)) # Order months
+
+# Plot monthly ridership trends for all months
+ggplot(monthly_trends, aes(x = Month_Name, y = Total_Validations)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  labs(
+    title = "Monthly Ridership Trends for All Months", 
+    x = "Month", 
+    y = "Total Validations"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for better readability
+
+
+```
+
+-   The plot shows seasonal ridership trends, with peaks in January, February, and March, reflecting regular commuting patterns. Ridership drops significantly in July and August, likely due to vacations, before recovering in September as work and school routines resume. A slight dip in December suggests reduced commuting during the holiday season. These trends highlight the impact of seasonal and holiday patterns on public transport usage.
+
+### **Outlier Analysis**
+
+We want to Identify days with exceptionally high or low ridership that may indicate anomalies.
+
+```{r}
+# Detect potential outliers based on IQR
+daily_ridership <- final_data %>%
+  group_by(JOUR) %>%
+  summarize(Total_Validations = sum(Sum_NB_VALD, na.rm = TRUE))
+
+Q1 <- quantile(daily_ridership$Total_Validations, 0.25, na.rm = TRUE)
+Q3 <- quantile(daily_ridership$Total_Validations, 0.75, na.rm = TRUE)
+IQR <- Q3 - Q1
+
+outliers <- daily_ridership %>%
+  filter(Total_Validations < (Q1 - 1.5 * IQR) | Total_Validations > (Q3 + 1.5 * IQR))
+
+# View outliers
+print(outliers)
+
+# Plot daily ridership highlighting outliers
+ggplot(daily_ridership, aes(x = JOUR, y = Total_Validations)) +
+  geom_line(color = "blue") +
+  geom_point(data = outliers, aes(x = JOUR, y = Total_Validations), color = "red", size = 2) +
+  labs(title = "Daily Ridership with Outliers Highlighted", x = "Date", y = "Total Validations") +
+  theme_minimal()
+
+
+```
+
+The plot highlights days with unusually low or high ridership compared to typical patterns, indicating potential anomalies. Days with exceptionally low ridership may correspond to national lockdown periods during the COVID-19 pandemic, public holidays, transport strikes, or extreme weather events that disrupted normal travel. Conversely, days with exceptionally high ridership could reflect spikes due to special events, festivals, or other occasions that led to increased use of public transportation.
+
+### 4. **Comparison with Norms**
+
+-   **"Normal" week and investigate deviations during holiday and non-holiday periods.**
+
+```{r}
+# a list of major holidays in France from 2018 to 2023 (French names)
+holiday_dates <- data.frame(
+  Date = as.Date(c(
+    "2018-01-01", "2018-05-01", "2018-07-14", "2018-12-25", # 2018
+    "2019-01-01", "2019-05-01", "2019-07-14", "2019-12-25", # 2019
+    "2020-01-01", "2020-05-01", "2020-07-14", "2020-12-25", # 2020
+    "2021-01-01", "2021-05-01", "2021-07-14", "2021-12-25", # 2021
+    "2022-01-01", "2022-05-01", "2022-07-14", "2022-12-25", # 2022
+    "2023-01-01", "2023-05-01", "2023-07-14", "2023-12-25"  # 2023
+  )),
+  Holiday = c(
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël", # 2018
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël", # 2019
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël", # 2020
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël", # 2021
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël", # 2022
+    "Jour de l'An", "Fête du Travail", "Fête Nationale", "Noël"  # 2023
+  )
+)
+
+# Merge holiday information into final_data
+final_data <- final_data %>%
+  left_join(holiday_dates, by = c("JOUR" = "Date")) %>%
+  mutate(Is_Holiday = ifelse(is.na(Holiday), "Jour non férié", Holiday)) # Assign holiday names or "Non-Holiday"
+
+# Compare ridership by holiday status
+holiday_effect <- final_data %>%
+  group_by(Is_Holiday) %>%
+  summarize(Average_Validations = mean(Sum_NB_VALD, na.rm = TRUE))
+
+# Plot holiday vs. non-holiday ridership
+ggplot(holiday_effect, aes(x = reorder(Is_Holiday, -Average_Validations), y = Average_Validations, fill = Is_Holiday)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Fréquentation pendant les jours fériés et non fériés",
+    x = "Jour férié",
+    y = "Validations moyennes"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate x-axis labels for readability
+```
+
+-   The bar plot reveals distinct differences in ridership patterns between holidays and non-holidays. **"Jour non férié" (non-holiday days)** show the highest average ridership, reflecting regular commuting patterns during workdays. Among holidays, **"Fête Nationale" (Bastille Day)** and **"Fête du Travail" (Labor Day)** have relatively higher ridership compared to **"Noël" (Christmas)** and **"Jour de l'An" (New Year's Day)**, likely due to specific events or public celebrations on those days. The lower ridership on Christmas and New Year's Day aligns with reduced activity and travel during these family-focused holidays.
+
+-   **The impact of vacations and school breaks on ridership patterns.**
+
+```{r}
+#  school vacation periods (example dates for France)
+vacation_periods <- data.frame(
+  Start = as.Date(c("2020-02-15", "2020-04-10", "2020-07-01", "2020-12-19")), 
+  End = as.Date(c("2020-03-02", "2020-04-27", "2020-08-31", "2021-01-03")), 
+  Vacation = c("Winter Break", "Spring Break", "Summer Break", "Christmas Break")
+)
+
+# Add vacation labels to final_data
+final_data <- final_data %>%
+  mutate(Vacation = case_when(
+    JOUR >= vacation_periods$Start[1] & JOUR <= vacation_periods$End[1] ~ "Winter Break",
+    JOUR >= vacation_periods$Start[2] & JOUR <= vacation_periods$End[2] ~ "Spring Break",
+    JOUR >= vacation_periods$Start[3] & JOUR <= vacation_periods$End[3] ~ "Summer Break",
+    JOUR >= vacation_periods$Start[4] & JOUR <= vacation_periods$End[4] ~ "Christmas Break",
+    TRUE ~ "No Vacation"
+  ))
+
+# Compare ridership during vacations vs. non-vacation periods
+vacation_comparison <- final_data %>%
+  group_by(Vacation) %>%
+  summarize(Average_Validations = mean(Sum_NB_VALD, na.rm = TRUE))
+
+# Plot vacation impact
+ggplot(vacation_comparison, aes(x = Vacation, y = Average_Validations, fill = Vacation)) +
+  geom_bar(stat = "identity") +
+  labs(
+    title = "Impact of School Vacations on Ridership",
+    x = "Vacation Period",
+    y = "Average Validations"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) # Rotate labels for readability
+
+```
+
+-   The plot shows that ridership is highest during regular periods (No Vacation), reflecting consistent commuting patterns. Winter Break maintains relatively high ridership among vacation periods due to holiday activities, while Spring Break sees the lowest ridership. Summer Break shows moderate ridership, likely driven by reduced commuting but supported by tourism. Christmas Break also sees a moderate decline, reflecting fewer workdays and localized travel. These trends highlight the need for adjusted transport planning during vacations.
+
+### 5. Dashboard Development using Shiny
+
+-   **To visualize the simulation , Run "/deployment/app.r"**
+
+### 6. Statistical Methods
+
+```{r}
+# Shapiro-Wilk test for normality
+shapiro_result <- shapiro.test(sample(data$Sum_NB_VALD, 5000, replace = FALSE))
+shapiro_stat <- shapiro_result$statistic
+p_value_shapiro <- shapiro_result$p.value
+
+# Display results
+print(paste("Shapiro-Wilk Test Statistic:", shapiro_stat))
+print(paste("P-value:", p_value_shapiro))
+
+
+
+```
+
+-   The p-value is extremely small (much lower than 0.05), which strongly suggests that the data **does not follow a normal distribution**. This implies that ridership data (`Sum_NB_VALD`) is significantly skewed or non-normally distributed.
+
+```{r}
+kruskal_result <- kruskal.test(Sum_NB_VALD ~ LIBELLE_ARRET, data = data)
+print(kruskal_result)
+
+```
+
+-   **p \< 0.05**: Significant difference in ridership between stations.
